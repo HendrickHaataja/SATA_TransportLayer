@@ -1,0 +1,10 @@
+data_buffer_w32_d8_inst : data_buffer_w32_d8 PORT MAP (
+		clock	 => clock_sig,
+		data	 => data_sig,
+		rdreq	 => rdreq_sig,
+		sclr	 => sclr_sig,
+		wrreq	 => wrreq_sig,
+		empty	 => empty_sig,
+		full	 => full_sig,
+		q	 => q_sig
+	);
