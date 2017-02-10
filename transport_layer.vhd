@@ -3,7 +3,7 @@ use ieee.std_logic_1164.all;    --! Use standard logic elements
 use ieee.numeric_std.all;       --! Use numeric standard
 ----------------------------------------------------------------------------
 --Status Truth Table:
--- XXX0 == Device Not Ready
+-- XXX0 == Device Not Ready--
 -- XXX1 == Device Ready
 -- XX01 == Write Not Ready
 -- XX11 == Write Ready
