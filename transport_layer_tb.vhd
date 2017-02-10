@@ -75,18 +75,22 @@ begin
 		rst_n <= '1';
 		wait for 2 ns;
 		command <= "001";
-		wait for 2 ns;
 
-		for i in 0 to 7 loop
-			wait until rising_edge(clk);
+
+		for i in 0 to 31 loop
 			user_data_in <= std_logic_vector(to_unsigned(i, 32));
+			wait until rising_edge(clk);
+		end loop;
+	
+		wait until rising_edge(clk);
+	
+		command <= "010";
+		for j in 0 to 31 loop
+			data_from_link <= data_to_link;
+			wait until rising_edge(clk);
 		end loop;
 
-		command <= "010";
-		for j in 0 to 7 loop
-			wait until rising_edge(clk);
-			data_from_link <= data_to_link;
-		end loop;
+		wait until rising_edge(clk);
 
 		command <= "100";
 		while status(3) = '1' loop

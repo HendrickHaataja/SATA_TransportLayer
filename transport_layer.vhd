@@ -43,7 +43,32 @@ end transport_layer;
 
 architecture transport_layer_arch of transport_layer is
 --States for Transport FSM
- 
+  type State_Type is (
+					--Initial "Main" State	
+					transport_idle, 
+					
+					decode_fis, --Do we need to wait for device signature -- I don't know if we need this?
+					
+					decode_dma_fis, decode_register_fis, -- Maybe don't need these?
+					
+					--================================================
+					--DMA Write States  --PRELIMINARY
+					 dma_write_idle, dma_write_reg_fis_0,
+					 dma_write_reg_fis_1, dma_write_reg_fis_2,
+					 dma_write_chk_activate, dma_write_data_fis,
+					 dma_write_data_frame,	dma_write_chk_status, 
+					--================================================						
+							
+					--================================================
+					--DMA Read States --PRELIMINARY
+					 dma_read_idle, dma_read_reg_fis_0,
+					 dma_read_reg_fis_1, dma_read_reg_fis_2,
+					 dma_read_data_fis, dma_read_data_frame,
+					 dma_read_chk_status 
+					--================================================								
+							
+					);	
+  signal state : State_Type;
 
 --======================================================================================
   -- Type Field Values of supported SATA Frame Information Structures (FIS)
@@ -153,7 +178,7 @@ signal rx_q : data_width_array_type;
 					signal tx0_read_valid, tx1_read_valid, rx0_read_valid, rx1_read_valid : std_logic;
 
 --Component declarations
-component data_buffer_w32_d8
+component data_buffer_w32_d32
 	PORT
 	(
 		clock		: IN STD_LOGIC ;
@@ -170,18 +195,16 @@ END component;
 
 begin
 
-tx0_data_buffer: data_buffer_w32_d8 port map(clock => clk, data => tx_data(0), rdreq => tx_rdreq(0), 
+tx0_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => tx_data(0), rdreq => tx_rdreq(0), 
 			 sclr => tx_sclr(0), wrreq => tx_wrreq(0), empty => tx_empty(0),
 			 full => tx_full(0), q => tx_q(0));
-
-tx1_data_buffer: data_buffer_w32_d8 port map(clock => clk, data => tx_data(1), rdreq => tx_rdreq(1), 
+tx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => tx_data(1), rdreq => tx_rdreq(1), 
 			 sclr => tx_sclr(1), wrreq => tx_wrreq(1), empty => tx_empty(1),
-			 full => tx_full(1), q => tx_q(1));
-			 
-rx0_data_buffer: data_buffer_w32_d8 port map(clock => clk, data => rx_data(0), rdreq => rx_rdreq(0), 
+			 full => tx_full(1), q => tx_q(1));			 
+rx0_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(0), rdreq => rx_rdreq(0), 
 			 sclr => rx_sclr(0), wrreq => rx_wrreq(0), empty => rx_empty(0),
 			 full => rx_full(0), q => rx_q(0));
-rx1_data_buffer: data_buffer_w32_d8 port map(clock => clk, data => rx_data(1), rdreq => rx_rdreq(1), 
+rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), rdreq => rx_rdreq(1), 
 			 sclr => rx_sclr(1), wrreq => rx_wrreq(1), empty => rx_empty(1),
 			 full => rx_full(1), q => rx_q(1));
 --=================================================================================================================
@@ -197,8 +220,8 @@ rx1_data_buffer: data_buffer_w32_d8 port map(clock => clk, data => rx_data(1), r
 			--reset stuff 
 			tx_sclr(0) <= '1';
 			tx_sclr(1) <= '1';
-			tx0_locked <= '0';
-			tx1_locked <= '0';
+			--tx0_locked <= '0';
+			--tx1_locked <= '0';
 			tx_wrreq(0) <= '0';
 			tx_wrreq(1) <= '0';
 			--temporary signal for testing
@@ -234,100 +257,6 @@ rx1_data_buffer: data_buffer_w32_d8 port map(clock => clk, data => rx_data(1), r
 		end if;
 	end process;
 
-
---=================================================================================================================
---Test tx buf process for stuff
-	tx_buffer_control_reads : process(clk, rst_n)
-	  begin
-		if(rst_n = '0') then
---			tx_sclr(0) <= '1';
---			tx_sclr(1) <= '1';
---			tx0_locked <= '0';
---			tx1_locked <= '0';
-			tx_rdreq(0) <= '0';
-			tx_rdreq(1) <= '0';
-			tx_read_request(0) <= '0';
-			tx_read_request(1) <= '0';
-		elsif(rising_edge(clk)) then
-			tx_sclr(0) <= '0';
-			tx_sclr(1) <= '0';		
-			if(user_command(1 downto 0) = "10") then
-				if(tx_empty(0) = '0' and tx0_locked = '0' and tx0_read_valid = '1') then
-					tx_rdreq(0) <= '1';
-					tx_read_request(0) <= '1';
-					if(tx_read_request(0) = '1') then
-						tx_data_out <= tx_q(0);
-					end if;
-				elsif(tx_empty(1) = '0' and tx1_locked = '0' and tx1_read_valid = '1') then
-					tx_rdreq(1) <= '1';
-					tx_read_request(1) <= '1';
-					if(tx_read_request(1) = '1') then
-						tx_data_out <= tx_q(1); 
-					end if;
-				--else
-					--Error: Should not get here unless source is overwhelming controller
-				end if;
-			else
-				tx_rdreq(0) <= '0';
-				tx_rdreq(1) <= '0';
-				tx_read_request(0) <= '0';
-				tx_read_request(1) <= '0';				
-			end if;
-		end if;
-	end process;
-
---test rx buf process for stuff
-	rx_buffer_control_writes : process(clk, rst_n)
-	  begin
-		if(rst_n = '0') then
-			--reset stuff 
-			rx_sclr(0) <= '1';
-			rx_sclr(1) <= '1';
-			rx0_locked <= '0';
-			rx1_locked <= '0';
-			rx_wrreq(0) <= '0';
-			rx_wrreq(1) <= '0';
-			--temporary signal for testing
-			rx0_read_valid <= '0';
-			rx1_read_valid <= '0';
-			--reset in use flags? or use full signals?
-		elsif(rising_edge(clk)) then
-			rx_sclr(0) <= '0';
-			rx_sclr(1) <= '0';
-			if(user_command(1 downto 0) = "10") then --user is sending data
-				if(rx_full(0) = '0' and rx0_locked = '0') then
-					--add user data to buffer
-					rx_wrreq(0) <= '1';
-					rx0_read_valid <= '0';
-					rx1_read_valid <= '1';
-					rx_data(0)  <= rx_data_in;		
-					rx_wrreq(1) <= '0'; 
-				elsif(rx_full(1) = '0' and rx1_locked = '0') then
-					--add user data to buffer
-					--temporary signal for testing
-					rx_wrreq(0) <= '0';
-					rx0_read_valid <= '1';
-					rx1_read_valid <= '0';
-					rx_wrreq(1) <= '1';
-					rx_data(1) <= rx_data_in; 
-				--else
-				--Error: Should not get here unless source is overwhelming controller
-				end if;
-			else
-				rx_wrreq(0) <= '0';
-				rx_wrreq(0) <= '0';
-				if(rx_empty(0) = '0') then
-					rx0_read_valid <= '1';
-				elsif(rx_empty(1) = '0') then
-					rx1_read_valid <= '1';
-				else
-					rx0_read_valid <= '0';
-					rx1_read_valid <= '0';
-				end if;
-			end if;
-		end if;
-		
-	end process;
 --Do something like: IsWriteValid <= tx0_buffer_in_use || tx1_buffer_in_use;
 --=================================================================================================================
 --old, keep for now as a reference 
@@ -370,8 +299,8 @@ rx1_data_buffer: data_buffer_w32_d8 port map(clock => clk, data => rx_data(1), r
 			rx_read_request(0) <= '0';
 			rx_read_request(1) <= '0';			
 		elsif(rising_edge(clk)) then
-			rx_sclr(0) <= '0';
-			rx_sclr(1) <= '0';		
+			--rx_sclr(0) <= '0';
+			--rx_sclr(1) <= '0';		
 			if(user_command(2) = '1') then
 				if(rx_empty(0) = '0' and rx0_locked = '0')then --and rx0_read_valid = '1') then
 					rx_rdreq(0) <= '1';
@@ -387,7 +316,7 @@ rx1_data_buffer: data_buffer_w32_d8 port map(clock => clk, data => rx_data(1), r
 					end if;
 				--else
 					--Error: Should not get here unless source is overwhelming controller
-				end if;
+				end if; --something
 			else
 	
 				rx_rdreq(0) <= '0';
@@ -401,6 +330,132 @@ rx1_data_buffer: data_buffer_w32_d8 port map(clock => clk, data => rx_data(1), r
 		end if;
 	end process;
 
+--============================================================================
+--============================================================================
+--test rx buf process for stuff
+	test_buf_sm : process(clk, rst_n)
+	  begin
+		if(rst_n = '0') then
+			--reset stuff 
+			rx_sclr(0) <= '1';
+			rx_sclr(1) <= '1';
+			rx0_locked <= '0';
+			rx1_locked <= '0';
+			rx_wrreq(0) <= '0';
+			rx_wrreq(1) <= '0';
+			
+			--tx_sclr(0) <= '1';
+			--tx_sclr(1) <= '1';
+			tx0_locked <= '0';
+			tx1_locked <= '0';
+			tx_rdreq(0) <= '0';
+			tx_rdreq(1) <= '0';
+			
+			--temporary signal for testing
+			rx0_read_valid <= '0';
+			rx1_read_valid <= '0';
+			state <= transport_idle;
+			--reset in use flags? or use full signals?
+		elsif(rising_edge(clk)) then
+			rx_sclr(0) <= '0';
+			rx_sclr(1) <= '0';
+
+			--tx_sclr(0) <= '0';
+			--tx_sclr(1) <= '0';
+
+
+		case (state) is
+		-----------------------------------------------	-----------------------------------------------	
+			-- Idle SM states (top level)
+		-----------------------------------------------	-----------------------------------------------		
+		when transport_idle =>
+		
+
+			--if (link_status = fis_received) then
+				--state <= decode_fis;	--is this how we should do this?				
+				
+			--els
+			if (tx_full(0) = '1') then	--User is sending "Write" command --Don't transition to DMA Write until a buffer is full
+				--Build register FIS?
+				--lock tx0 buffer
+				tx0_locked <= '1';
+				--set buffer index to zero
+				tx_index <= 0;
+				--Proceed to DMA Write
+				state <= dma_write_idle;
+			elsif (tx_full(1) = '1') then
+				--Build register FIS?
+				--lock tx1 buffer
+				tx1_locked <= '1';
+				--set buffer index to 1
+				tx_index <= 1;
+				--Proceed to DMA Write
+				state <= dma_write_idle;
+						
+			elsif (command(1 downto 0)= "10") then
+				--lock rx buffer
+				--rx_locked = '1';
+				--build read register FIS?
+				state <= dma_read_idle;
+			end if;
+		
+		when dma_read_idle =>
+			if(rx_full(0) = '0') then
+				rx_index <= 0;
+				rx_wrreq(0) <= '1';
+				rx0_locked <= '1';
+				state <= dma_read_data_frame;
+			elsif(rx_full(1) = '0') then
+				rx_index <= 1;
+				rx_wrreq(1) <= '1';
+				rx1_locked <= '1';
+				state <= dma_read_data_frame;			
+			end if;
+	
+		when dma_read_data_frame =>
+			if(rx_full(rx_index) = '0') then-- and data_valid = '1') then --data valid flag saying data from link is coming
+				rx_data(rx_index) <= rx_data_in;
+			else
+				rx_wrreq(rx_index) <= '0';
+				if(rx_full(rx_index mod 1) = '0') then
+					if(rx_index = 0) then
+						rx_index <= 1;
+						rx_wrreq(1) <= '1';
+						rx1_locked <= '1';
+						rx0_locked <= '0';
+					else
+						rx_index <= 0;
+						rx_wrreq(0) <= '1';
+						rx0_locked <= '1';						
+						rx1_locked <= '0';
+					end if;
+				end if;
+			end if;
+			 
+		when dma_write_idle =>
+			--if(link_busy = '0') then
+				tx_rdreq(tx_index) <= '1';
+				state <= dma_write_data_frame;
+			--end if;
+		
+		when dma_write_data_frame =>
+			if(tx_empty(tx_index) = '0') then
+				tx_data_out <= tx_q(tx_index);
+			else
+				tx_rdreq(tx_index) <= '0';
+				state <= transport_idle;
+				if(tx_index = 0) then
+					tx0_locked <= '0';
+				else
+					tx1_locked <= '0';
+				end if;
+			end if;
+		when others =>  state <= transport_idle;
+		end case;
+	  end if;
+	end process;
+--============================================================================
+--============================================================================
 	--update status vectors
 	status_to_user(0) <= '1'; --having device always be ready for now
 	status_to_user(1) <= '1' when (tx_full(0) = '0' or tx_full(1) = '0') else '0';
