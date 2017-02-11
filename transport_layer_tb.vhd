@@ -1,7 +1,7 @@
 library ieee;                   --! Use standard library.
 use ieee.std_logic_1164.all;    --! Use standard logic elements
 use ieee.numeric_std.all;       --! Use numeric standard
---
+
 entity transport_layer_tb is
 end transport_layer_tb;
 
@@ -81,15 +81,23 @@ begin
 			user_data_in <= std_logic_vector(to_unsigned(i, 32));
 			wait until rising_edge(clk);
 		end loop;
-	
 		wait until rising_edge(clk);
 	
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
+
 		command <= "010";
+
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
 		for j in 0 to 31 loop
 			data_from_link <= data_to_link;
 			wait until rising_edge(clk);
 		end loop;
 
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
 		wait until rising_edge(clk);
 
 		command <= "100";

@@ -3,7 +3,7 @@ use ieee.std_logic_1164.all;    --! Use standard logic elements
 use ieee.numeric_std.all;       --! Use numeric standard
 ----------------------------------------------------------------------------
 --Status Truth Table:
--- XXX0 == Device Not Ready--
+-- XXX0 == Device Not Ready
 -- XXX1 == Device Ready
 -- XX01 == Write Not Ready
 -- XX11 == Write Ready
@@ -439,9 +439,11 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 			--end if;
 		
 		when dma_write_data_frame =>
-			if(tx_empty(tx_index) = '0') then
-				tx_data_out <= tx_q(tx_index);
-			else
+			tx_data_out <= tx_q(tx_index);	--took this out of if statement so last value is still latched out
+			--if(tx_empty(tx_index) = '0') then
+			--	state <= dma_write_data_frame;
+			--else
+			if(tx_empty(tx_index) = '1') then
 				tx_rdreq(tx_index) <= '0';
 				state <= transport_idle;
 				if(tx_index = 0) then
