@@ -21,6 +21,9 @@ signal data_to_link, data_from_link	: std_logic_vector(31 downto 0);
 
 constant clk_period : time := 1 ns; --not accurate to device
 
+type fake_sata_memory_type is array (31 downto 0) of std_logic_vector(31 downto 0);
+signal fake_memory : fake_sata_memory_type;
+
 --component for DUT--
 component transport_layer 	
    port(
@@ -87,12 +90,23 @@ begin
 		wait until rising_edge(clk);
 		wait until rising_edge(clk);
 
-		command <= "010";
+		command <= "000";
 
 		wait until rising_edge(clk);
 		wait until rising_edge(clk);
 		for j in 0 to 31 loop
-			data_from_link <= data_to_link;
+			fake_memory(j) <= data_to_link;
+			wait until rising_edge(clk);
+		end loop;
+
+
+
+		command <= "010";
+
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
+		for k in 0 to 31 loop
+			data_from_link <= fake_memory(k);
 			wait until rising_edge(clk);
 		end loop;
 
@@ -101,6 +115,8 @@ begin
 		wait until rising_edge(clk);
 
 		command <= "100";
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
 		while status(3) = '1' loop
 			wait until rising_edge(clk);
 		end loop;

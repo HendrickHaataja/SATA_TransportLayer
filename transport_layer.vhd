@@ -252,7 +252,7 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 				end if;
 			else
 				tx_wrreq(0) <= '0';
-				tx_wrreq(0) <= '0';
+				tx_wrreq(1) <= '0';
 			end if;
 		end if;
 	end process;
@@ -287,6 +287,7 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 	--end process;
 --new for test, use to develop actual process
 
+	--
 	rx_buffer_control_reads : process(clk, rst_n)
 	  begin
 		if(rst_n = '0') then
@@ -302,23 +303,32 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 			--rx_sclr(0) <= '0';
 			--rx_sclr(1) <= '0';		
 			if(user_command(2) = '1') then
-				if(rx_empty(0) = '0' and rx0_locked = '0')then --and rx0_read_valid = '1') then
+				if(rx0_locked = '0')then --and rx0_read_valid = '1') then
+					--immediately assert rdreq so value is valid on next clock cycle
+					--using rx_read_request to allow one clock cycle between bringing rdreq high and reading data
 					rx_rdreq(0) <= '1';
 					rx_read_request(0) <= '1';
 					if(rx_read_request(0) = '1') then
 						read_data <= rx_q(0);
+						if(rx_empty(0) = '1') then
+							rx_rdreq(0) <= '0';
+							rx_read_request(0) <= '0';
+						end if;
 					end if;
-				elsif(rx_empty(1) = '0' and rx1_locked = '0')then --and rx1_read_valid = '1') then
+				elsif(rx1_locked = '0')then --and rx1_read_valid = '1') then --if(rx_empty(1) = '0'
 					rx_rdreq(1) <= '1';
 					rx_read_request(1) <= '1';
 					if(rx_read_request(1) = '1') then
 						read_data <= rx_q(1); 
+						if(rx_empty(1) = '1') then
+							rx_rdreq(1) <= '0';
+							rx_read_request(1) <= '0';
+						end if;
 					end if;
 				--else
 					--Error: Should not get here unless source is overwhelming controller
 				end if; --something
 			else
-	
 				rx_rdreq(0) <= '0';
 				rx_rdreq(1) <= '0';
 				if(rx_empty(0) = '1' and rx_empty(1) = '1') then
@@ -329,7 +339,6 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 			end if;
 		end if;
 	end process;
-
 --============================================================================
 --============================================================================
 --test rx buf process for stuff
@@ -392,7 +401,7 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 				--Proceed to DMA Write
 				state <= dma_write_idle;
 						
-			elsif (command(1 downto 0)= "10") then
+			elsif (user_command(1 downto 0)= "10") then
 				--lock rx buffer
 				--rx_locked = '1';
 				--build read register FIS?
@@ -402,36 +411,30 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 		when dma_read_idle =>
 			if(rx_full(0) = '0') then
 				rx_index <= 0;
-				rx_wrreq(0) <= '1';
+				--rx_wrreq(0) <= '1';
 				rx0_locked <= '1';
 				state <= dma_read_data_frame;
 			elsif(rx_full(1) = '0') then
 				rx_index <= 1;
-				rx_wrreq(1) <= '1';
+				--rx_wrreq(1) <= '1';
 				rx1_locked <= '1';
 				state <= dma_read_data_frame;			
 			end if;
 	
 		when dma_read_data_frame =>
 			if(rx_full(rx_index) = '0') then-- and data_valid = '1') then --data valid flag saying data from link is coming
+				rx_wrreq(rx_index) <= '1';
 				rx_data(rx_index) <= rx_data_in;
 			else
 				rx_wrreq(rx_index) <= '0';
-				if(rx_full(rx_index mod 1) = '0') then
-					if(rx_index = 0) then
-						rx_index <= 1;
-						rx_wrreq(1) <= '1';
-						rx1_locked <= '1';
-						rx0_locked <= '0';
-					else
-						rx_index <= 0;
-						rx_wrreq(0) <= '1';
-						rx0_locked <= '1';						
-						rx1_locked <= '0';
-					end if;
-				end if;
-			end if;
-			 
+				if(rx_index = 0) then	
+					rx0_locked <= '0';
+				else					
+					rx1_locked <= '0';	
+				end if;				
+				state <= transport_idle;
+			end if;			 
+
 		when dma_write_idle =>
 			--if(link_busy = '0') then
 				tx_rdreq(tx_index) <= '1';
