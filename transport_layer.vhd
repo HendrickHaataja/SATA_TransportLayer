@@ -1,6 +1,8 @@
 library ieee;                   --! Use standard library.
 use ieee.std_logic_1164.all;    --! Use standard logic elements
 use ieee.numeric_std.all;       --! Use numeric standard
+
+use work.transport_layer_pkg.all;
 ----------------------------------------------------------------------------
 --Status Truth Table:
 -- XXX0 == Device Not Ready
@@ -19,7 +21,6 @@ use ieee.numeric_std.all;       --! Use numeric standard
 -- 1XX == Retrieve Read  (Command to read value from Rx buffer)
 ----------------------------------------------------------------------------
 entity transport_layer is
-	generic(DATA_WIDTH : integer := 32);
    port(
 		--Interface with Application Layer
 		rst_n			:	in std_logic;
@@ -35,6 +36,7 @@ entity transport_layer is
 		read_address	:	out std_logic_vector(DATA_WIDTH - 1 downto 0);
 		
 		--Interface with Link Layer
+		status_to_link :	out std_logic_vector(7 downto 0); --for test just use bit 0 to indicate data ready
 		link_status		:	in std_logic_vector(31 downto 0);
 		tx_data_out		:	out std_logic_vector(DATA_WIDTH - 1 downto 0);
 		rx_data_in		:	in std_logic_vector(DATA_WIDTH - 1 downto 0));
@@ -42,177 +44,92 @@ entity transport_layer is
 end transport_layer;
 
 architecture transport_layer_arch of transport_layer is
---States for Transport FSM
-  type State_Type is (
-					--Initial "Main" State	
-					transport_idle, 
-					
-					decode_fis, --Do we need to wait for device signature -- I don't know if we need this?
-					
-					decode_dma_fis, decode_register_fis, -- Maybe don't need these?
-					
-					--================================================
-					--DMA Write States  --PRELIMINARY
-					 dma_write_idle, dma_write_reg_fis_0,
-					 dma_write_reg_fis_1, dma_write_reg_fis_2,
-					 dma_write_chk_activate, dma_write_data_fis,
-					 dma_write_data_frame,	dma_write_chk_status, 
-					--================================================						
-							
-					--================================================
-					--DMA Read States --PRELIMINARY
-					 dma_read_idle, dma_read_reg_fis_0,
-					 dma_read_reg_fis_1, dma_read_reg_fis_2,
-					 dma_read_data_fis, dma_read_data_frame,
-					 dma_read_chk_status 
-					--================================================								
-							
-					);	
-  signal state : State_Type;
+	
+  signal state : State_Type; 
 
---======================================================================================
-  -- Type Field Values of supported SATA Frame Information Structures (FIS)
-  -- Supported Register FIS Type Field Value
-  constant REG_HOST_TO_DEVICE	: std_logic_vector(7 downto 0) := x"27";  --5 Dwords
-  constant REG_DEVICE_TO_HOST	: std_logic_vector(7 downto 0) := x"34";
-  
-  -- Supported DMA FIS Type Field Value
-  constant DMA_ACTIVATE_FIS		: std_logic_vector(7 downto 0) := x"39"; --Device to Host -- 1 dword
-  --constant DMA_SETUP_FIS		: std_logic_vector(7 downto 0) := x"41"; --Bidirectional  -- 7 dwords --not using
-  
-  -- Data FIS type field value
-  constant DATA_FIS				: std_logic_vector(7 downto 0) := x"46"; --Bidirectional
---======================================================================================
+	--======================================================================================
+	--Signals to create Register Host to Device FIS contents
+	signal fis_type : std_logic_vector(7 downto 0);
 
---======================================================================================
---Signals to create Register Host to Device FIS contents
-signal fis_type : std_logic_vector(7 downto 0);
+	--Shadow Registers... Somewhat customized for ease of use
+	signal feature : std_logic_vector(15 downto 0); -- a reserved field in DMA read ext, DMA write ext. Set to all zeros
+	signal lba : std_logic_vector(47 downto 0);   --address to write to / read from
+	signal control : std_logic_vector(7 downto 0);	--Field not defined for DMA read/write ext. Thus is "reserved", set to zeros
+	signal command : std_logic_vector(7 downto 0);	--35h for dma write ext, 25h dma read ext
+	signal c_bit 	   : std_logic;					--Set to one when register transfer is due to update of command reg.
+	signal count : std_logic_vector(15 downto 0);	--# of logical sectors to be transferred for DMA. 0000h indicates 65.536 sectors	
+	--------------------------------------------------
+	--	set bit 6 to 1, bit 4 is Transport Dependent, think it should be zero
+	--Bits 7, 5 are obsolete? Currently planning on setting to zero
+	signal device: std_logic_vector(7 downto 0);	
+	--------------------------------------------------
+	signal i_bit		: std_logic;                    --used only for device to host
+	signal status		: std_logic_vector(7 downto 0); --used only for device to host
+	signal error		: std_logic_vector(7 downto 0); --used only for device to host
+	--======================================================================================
 
---Shadow Registers... Somewhat customized for ease of use
-signal feature : std_logic_vector(15 downto 0); -- a reserved field in DMA read ext, DMA write ext. Set to all zeros
-signal lba : std_logic_vector(47 downto 0);   --address to write to / read from
-signal control : std_logic_vector(7 downto 0);	--Field not defined for DMA read/write ext. Thus is "reserved", set to zeros
-signal command : std_logic_vector(7 downto 0);	--35h for dma write ext, 25h dma read ext
-signal c_bit 	   : std_logic;					--Set to one when register transfer is due to update of command reg.
-signal count : std_logic_vector(15 downto 0);	--# of logical sectors to be transferred for DMA. 0000h indicates 65.536 sectors	
---------------------------------------------------
---	set bit 6 to 1, bit 4 is Transport Dependent, think it should be zero
---Bits 7, 5 are obsolete. Planning on setting to zero
-signal device: std_logic_vector(7 downto 0);	
---------------------------------------------------
+	signal tx_fis_array, rx_fis_array	:	register_fis_array_type; -- signals to hold host to device register FIS contents
 
+	--======================================================================================
+	--Constants for user commands --NOT USING BECAUSE DON'T CARES DON'T WORK IN VHDL
+	--constant SEND_WRITE		: std_logic_vector (2 downto 0) := "X01";
+	--constant SEND_READ  	: std_logic_vector (2 downto 0)	:= "X10";
+	--constant RETRIEVE_READ	: std_logic_vector (2 downto 0)	:= "1XX";
+	--======================================================================================
 
+	--======================================================================================
+	--Signals to control buffers
+	signal tx0_locked, tx1_locked, rx0_locked, rx1_locked : std_logic; -- Custom signal to allow SM to take control of buffers
+	signal tx_index : integer range 0 to 1; -- custom signal to use as index to array of tx register FISs
+	signal rx_index : integer range 0 to 1; -- custom signal to use as index to array of tx register FISs
 
-signal i_bit		: std_logic;                    --used only for device to host
-signal status		: std_logic_vector(7 downto 0); --used only for device to host
-signal error		: std_logic_vector(7 downto 0); --used only for device to host
---======================================================================================
+	--signals have latency of one clock cycle using area optimization... especially rdreq to q[]!
+	signal tx_data : data_width_array_type;
+	signal tx_rdreq : std_logic_vector(1 downto 0);
+	signal tx_sclr : std_logic_vector(1 downto 0);
+	signal tx_wrreq : std_logic_vector(1 downto 0);
+	signal tx_almost_empty : std_logic_vector(1 downto 0);
+	signal tx_almost_full : std_logic_vector(1 downto 0);
+	signal tx_empty : std_logic_vector(1 downto 0);
+	signal tx_full : std_logic_vector(1 downto 0);
+	signal tx_q : data_width_array_type;
 
-
---Record type for Host to Device register FIS
-type register_fis_type	is
-  record
-	fis_type :	std_logic_vector(7 downto 0);		--set to 27h
-	crrr_pm	 :	std_logic_vector(7 downto 0); 		--set to 80h	
-	command : std_logic_vector(7 downto 0);			--see command support constants
-	features : std_logic_vector(7 downto 0);  		--set to 00h
-	lba : std_logic_vector(23 downto 0);			--lower half of address
-	device: std_logic_vector(7 downto 0);     		--set to 40h?
-	lba_ext : std_logic_vector(23 downto 0);		--upper half of address
-	features_ext : std_logic_vector(7 downto 0); 	--set to 00h
-	count : std_logic_vector(15 downto 0);			--Will be size of tx buffer
-	icc	  : std_logic_vector(7 downto 0); 			--set to 00h
-	control : std_logic_vector(7 downto 0); 		--set to 00h
-	aux		: std_logic_vector(31 downto 0);		--set to all zeros
-end record;
-
-type register_fis_array_type is array (1 downto 0) of register_fis_type;
-signal tx_fis_array, rx_fis_array	:	register_fis_array_type;
-
---signal rx_reg_fis	:	register_fis_type;
-
---======================================================================================
---Supported ATA Commands
---need EXT commands to support 48 bit address
-constant READ_DMA_EXT	: std_logic_vector(7 downto 0) := x"25";
-constant WRITE_DMA_EXT	: std_logic_vector(7 downto 0) := x"35";
---======================================================================================
-
-
---======================================================================================
---Constants for user commands --NOT USING BECAUSE DON'T CARES DON'T WORK IN VHDL
---constant SEND_WRITE		: std_logic_vector (2 downto 0) := "X01";
---constant SEND_READ  	: std_logic_vector (2 downto 0)	:= "X10";
---constant RETRIEVE_READ	: std_logic_vector (2 downto 0)	:= "1XX";
---======================================================================================
-
---======================================================================================
---Signals to control buffers
-signal tx0_locked, tx1_locked, rx0_locked, rx1_locked : std_logic; -- Custom signal to allow SM to take control of buffers
-signal tx_index : integer range 0 to 1; -- custom signal to use as index to array of tx register FISs
-signal rx_index : integer range 0 to 1; -- custom signal to use as index to array of tx register FISs
-
---array type: holds two std_logic_vectors of sys data width
-type data_width_array_type is array (1 downto 0) of std_logic_vector(DATA_WIDTH - 1 downto 0); 
-
---signals have latency of one clock cycle using area optimization... especially rdreq to q[]!
-signal tx_data : data_width_array_type;
-signal tx_rdreq : std_logic_vector(1 downto 0);
-signal tx_sclr : std_logic_vector(1 downto 0);
-signal tx_wrreq : std_logic_vector(1 downto 0);
-signal tx_empty : std_logic_vector(1 downto 0);
-signal tx_full : std_logic_vector(1 downto 0);
-signal tx_q : data_width_array_type;
-
-signal rx_data : data_width_array_type;
-signal rx_rdreq : std_logic_vector(1 downto 0);
-signal rx_sclr : std_logic_vector(1 downto 0);
-signal rx_wrreq : std_logic_vector(1 downto 0);
-signal rx_empty : std_logic_vector(1 downto 0);
-signal rx_full : std_logic_vector(1 downto 0);
-signal rx_q : data_width_array_type;
---======================================================================================
-					signal tx_read_request, rx_read_request : std_logic_vector(1 downto 0);
-					
-					--temporary signal for testing
-					signal tx0_read_valid, tx1_read_valid, rx0_read_valid, rx1_read_valid : std_logic;
-
---Component declarations
-component data_buffer_w32_d32
-	PORT
-	(
-		clock		: IN STD_LOGIC ;
-		data		: IN STD_LOGIC_VECTOR (DATA_WIDTH - 1 DOWNTO 0);
-		rdreq		: IN STD_LOGIC ;
-		sclr		: IN STD_LOGIC ;
-		wrreq		: IN STD_LOGIC ;
-		empty		: OUT STD_LOGIC ;
-		full		: OUT STD_LOGIC ;
-		q		: OUT STD_LOGIC_VECTOR (DATA_WIDTH - 1 DOWNTO 0)
-	);
-END component;
-
+	signal rx_data : data_width_array_type;
+	signal rx_rdreq : std_logic_vector(1 downto 0);
+	signal rx_sclr : std_logic_vector(1 downto 0);
+	signal rx_wrreq : std_logic_vector(1 downto 0);
+	signal rx_almost_empty : std_logic_vector(1 downto 0);
+	signal rx_almost_full : std_logic_vector(1 downto 0);
+	signal rx_empty : std_logic_vector(1 downto 0);
+	signal rx_full : std_logic_vector(1 downto 0);
+	signal rx_q : data_width_array_type;
+	--======================================================================================
+						
+	signal tx_read_request, rx_read_request : std_logic_vector(1 downto 0);
+						
+	--temporary signal for testing
+	signal tx0_read_valid, tx1_read_valid, rx0_read_valid, rx1_read_valid : std_logic;
+	
+	--test link interface status signals
+	signal link_is_idle : std_logic;
 
 begin
-
-tx0_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => tx_data(0), rdreq => tx_rdreq(0), 
-			 sclr => tx_sclr(0), wrreq => tx_wrreq(0), empty => tx_empty(0),
-			 full => tx_full(0), q => tx_q(0));
-tx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => tx_data(1), rdreq => tx_rdreq(1), 
-			 sclr => tx_sclr(1), wrreq => tx_wrreq(1), empty => tx_empty(1),
-			 full => tx_full(1), q => tx_q(1));			 
-rx0_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(0), rdreq => rx_rdreq(0), 
-			 sclr => rx_sclr(0), wrreq => rx_wrreq(0), empty => rx_empty(0),
-			 full => rx_full(0), q => rx_q(0));
-rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), rdreq => rx_rdreq(1), 
-			 sclr => rx_sclr(1), wrreq => rx_wrreq(1), empty => rx_empty(1),
-			 full => rx_full(1), q => rx_q(1));
+	--buffer instantiations
+	tx0_data_buffer: data_bufer_w32_d16_extended port map(clock => clk, data => tx_data(0), rdreq => tx_rdreq(0), 
+				 sclr => tx_sclr(0), wrreq => tx_wrreq(0), almost_empty => tx_almost_empty(0), 
+				 almost_full => tx_almost_full(0), empty => tx_empty(0), full => tx_full(0), q => tx_q(0));
+	tx1_data_buffer: data_bufer_w32_d16_extended port map(clock => clk, data => tx_data(1), rdreq => tx_rdreq(1), 
+				 sclr => tx_sclr(1), wrreq => tx_wrreq(1), almost_empty => tx_almost_empty(1), 
+				 almost_full => tx_almost_full(1), empty => tx_empty(1), full => tx_full(1), q => tx_q(1));			 
+	rx0_data_buffer: data_bufer_w32_d16_extended port map(clock => clk, data => rx_data(0), rdreq => rx_rdreq(0), 
+				 sclr => rx_sclr(0), wrreq => rx_wrreq(0), almost_empty => rx_almost_empty(0), 
+				 almost_full => rx_almost_full(0), empty => rx_empty(0), full => rx_full(0), q => rx_q(0));
+	rx1_data_buffer: data_bufer_w32_d16_extended port map(clock => clk, data => rx_data(1), rdreq => rx_rdreq(1), 
+				 sclr => rx_sclr(1), wrreq => rx_wrreq(1), almost_empty => rx_almost_empty(1),
+				 almost_full => rx_almost_full(1), empty => rx_empty(1), full => rx_full(1), q => rx_q(1));
 --=================================================================================================================
 --Process to control the flow of user data into the tx buffers
 --The dual-buffer system allows user data to be written to a buffer even when the Transort FSM is performing a write command
-
-	--tx_wrreq(0) <= '1' when (user_command(1 downto 0) = "01" and tx_full(0) = '0' and tx0_locked = '0' and tx_wrreq(1) = '0') else '0'; --when others;
-	--tx_wrreq(1) <= '1' when (user_command(1 downto 0) = "01" and tx_full(1) = '0' and tx1_locked = '0' and tx_wrreq(0) = '0') else '0';-- when others;
 
 	tx_buffer_control	: process(clk,rst_n)
 	  begin
@@ -232,21 +149,21 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 			tx_sclr(0) <= '0';
 			tx_sclr(1) <= '0';
 			if(user_command(1 downto 0) = "01") then --user is sending data
-				if(tx_full(0) = '0' and tx0_locked = '0') then
+				if(tx_almost_full(0) = '0' and tx0_locked = '0') then
 					--add user data to buffer
 					tx_wrreq(0) <= '1';
 					tx0_read_valid <= '0';
 					tx1_read_valid <= '1';
 					tx_data(0)  <= write_data;		
 					tx_wrreq(1) <= '0'; 
-				elsif(tx_full(1) = '0' and tx1_locked = '0') then
+				elsif(tx_almost_full(1) = '0' and tx1_locked = '0') then
 					--add user data to buffer
 					--temporary signal for testing
-					tx_wrreq(0) <= '0';
-					tx0_read_valid <= '1';
-					tx1_read_valid <= '0';
 					tx_wrreq(1) <= '1';
+					tx1_read_valid <= '0';
+					tx0_read_valid <= '1';
 					tx_data(1) <= write_data; 
+					tx_wrreq(0) <= '0';
 				else
 				--Error: Should not get here unless source is overwhelming controller
 				end if;
@@ -257,37 +174,6 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 		end if;
 	end process;
 
---Do something like: IsWriteValid <= tx0_buffer_in_use || tx1_buffer_in_use;
---=================================================================================================================
---old, keep for now as a reference 
-	--rx_buffer_control	: process(clk, rst_n)
-	--  begin
-	--	if(rst_n = '0') then
-	--		rx_sclr(0) <= '1';
-	--		rx_sclr(1) <= '1';
-	--		rx0_locked <= '0';
-	--		rx1_locked <= '0';
-	--		rx_rdreq(0) <= '0';
-	--		rx_rdreq(1) <= '0';
-	--	elsif(rising_edge(clk)) then
-	--		rx_sclr(0) <= '0';
-	--		rx_sclr(1) <= '0';		
-	--		if(user_command(1 downto 0) = "10") then
-	--			if(rx_empty(0) = '0' and rx0_locked = '0') then
-	--				rx_rdreq(0) <= '1';
-	--				read_data <= rx_q(1);
-	--			elsif(rx_empty(1) = '0' and rx1_locked = '0') then
-	--				rx_rdreq(1) <= '1';
-	--				read_data <= rx_q(1); 
-	--			else
-	--				--Error: Should not get here unless source is overwhelming controller
-	--			end if;
-	--		end if;
-	--	end if;
-	--end process;
---new for test, use to develop actual process
-
-	--
 	rx_buffer_control_reads : process(clk, rst_n)
 	  begin
 		if(rst_n = '0') then
@@ -364,7 +250,8 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 			rx0_read_valid <= '0';
 			rx1_read_valid <= '0';
 			state <= transport_idle;
-			--reset in use flags? or use full signals?
+			
+			status_to_link(0) <= '0'; --FOR TEST
 		elsif(rising_edge(clk)) then
 			rx_sclr(0) <= '0';
 			rx_sclr(1) <= '0';
@@ -378,7 +265,7 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 			-- Idle SM states (top level)
 		-----------------------------------------------	-----------------------------------------------		
 		when transport_idle =>
-		
+			status_to_link(0) <= '0';
 
 			--if (link_status = fis_received) then
 				--state <= decode_fis;	--is this how we should do this?				
@@ -436,24 +323,25 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 			end if;			 
 
 		when dma_write_idle =>
-			--if(link_busy = '0') then
+			if(link_is_idle = '1') then --have this check here or next state?
 				tx_rdreq(tx_index) <= '1';
 				state <= dma_write_data_frame;
-			--end if;
+			end if;
 		
 		when dma_write_data_frame =>
+			status_to_link(0) <= '1'; --FOR TEST!! update after interface discussion
 			tx_data_out <= tx_q(tx_index);	--took this out of if statement so last value is still latched out
 			--if(tx_empty(tx_index) = '0') then
 			--	state <= dma_write_data_frame;
 			--else
-			if(tx_empty(tx_index) = '1') then
+			if(tx_almost_empty(tx_index) = '1') then
 				tx_rdreq(tx_index) <= '0';
-				state <= transport_idle;
 				if(tx_index = 0) then
 					tx0_locked <= '0';
 				else
 					tx1_locked <= '0';
 				end if;
+				if(tx_empty(tx_index) = '1') then state <= transport_idle; end if;
 			end if;
 		when others =>  state <= transport_idle;
 		end case;
@@ -466,6 +354,9 @@ rx1_data_buffer: data_buffer_w32_d32 port map(clock => clk, data => rx_data(1), 
 	status_to_user(1) <= '1' when (tx_full(0) = '0' or tx_full(1) = '0') else '0';
 	status_to_user(2) <= '1' when (rx_full(0) = '0' or rx_full(1) = '0') else '0';
 	status_to_user(3) <= '1' when (rx_empty(0) = '0' or rx_empty(1) = '0') else '0';
-
-
+	
+	
+	
+	--assignments for testing purposes
+	link_is_idle <= link_status (0);
 end architecture;

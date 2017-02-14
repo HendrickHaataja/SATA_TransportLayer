@@ -16,6 +16,7 @@ signal status : std_logic_vector(3 downto 0);
 signal command : std_logic_vector(2 downto 0);
 
 --link interface
+signal transport_status : std_logic_vector(7 downto 0);
 signal link_status	: std_logic_vector(31 downto 0);
 signal data_to_link, data_from_link	: std_logic_vector(31 downto 0);
 
@@ -41,6 +42,7 @@ component transport_layer
 		read_address	:	out std_logic_vector(31 downto 0);
 		
 		--Interface with Link Layer
+		status_to_link	: 	out std_logic_vector(7 downto 0);
 		link_status		:	in std_logic_vector(31 downto 0);
 		tx_data_out		:	out std_logic_vector(31 downto 0);
 		rx_data_in		:	in std_logic_vector(31 downto 0));
@@ -58,6 +60,7 @@ begin
 								  status_to_user => status,
 								  read_data => user_data_out,
 								  read_address => user_addr_out,
+								  status_to_link => transport_status,
 								  link_status => link_status,
 								  tx_data_out => data_to_link,
 								  rx_data_in => data_from_link);
@@ -71,6 +74,7 @@ begin
 	end process;
 	
 	stim_proc : process
+		variable j : integer range 0 to 32;
 	  begin
 		wait for 2 ns;
 		rst_n <= '0';
@@ -85,7 +89,8 @@ begin
 			wait until rising_edge(clk);
 		end loop;
 		wait until rising_edge(clk);
-	
+		--I think the link status assignment should be here?
+		link_status <= x"00000001";
 		wait until rising_edge(clk);
 		wait until rising_edge(clk);
 		wait until rising_edge(clk);
@@ -93,12 +98,14 @@ begin
 		command <= "000";
 
 		wait until rising_edge(clk);
-		wait until rising_edge(clk);
-		for j in 0 to 31 loop
-			fake_memory(j) <= data_to_link;
-			wait until rising_edge(clk);
+		while j < 32 loop
+			if(transport_status(0) = '1') then
+				wait until rising_edge(clk);
+				fake_memory(j) <= data_to_link;
+				j := j + 1;
+			end if;
 		end loop;
-
+		wait until rising_edge(clk);
 
 
 		command <= "010";
