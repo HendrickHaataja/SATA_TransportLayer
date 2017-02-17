@@ -25,8 +25,6 @@ constant clk_period : time := 1 ns; --not accurate to device
 type fake_sata_memory_type is array (31 downto 0) of std_logic_vector(31 downto 0);
 signal fake_memory : fake_sata_memory_type;
 
-signal sending_data : std_logic := '0';
-
 --component for DUT--
 component transport_layer 	
    port(
@@ -75,37 +73,52 @@ begin
 		wait for clk_period/2;
 	end process;
 	
-	--simulating user process
-	app_stim_proc : process
+	stim_proc : process
+		variable j : integer range 0 to 32;
 	  begin
 		wait for 2 ns;
 		rst_n <= '0';
 		wait for 2 ns;
 		rst_n <= '1';
-		sending_data <= '0';
 		wait for 2 ns;
-		wait until rising_edge(clk);
 		command <= "001";
-		sending_data <= '1';
+
 
 		for i in 0 to 31 loop
 			user_data_in <= std_logic_vector(to_unsigned(i, 32));
 			wait until rising_edge(clk);
 		end loop;
 		wait until rising_edge(clk);
-		sending_data <= '0';		
-		
-		command <= "000";
-		--wait for read valid flag
-		wait until status(2) = '1';
+		--I think the link status assignment should be here?
+		link_status <= x"00000001";
 		wait until rising_edge(clk);
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
+
+		command <= "000";
+
+		wait until rising_edge(clk);
+		while j < 32 loop
+			if(transport_status(0) = '1') then
+				fake_memory(j) <= data_to_link;
+				j := j + 1;
+			end if;
+			wait until rising_edge(clk);
+		end loop;
+
+
 
 		command <= "010";
 
 		wait until rising_edge(clk);
 		wait until rising_edge(clk);
-		
-		wait until status(3) = '1';
+		for k in 0 to 31 loop
+			data_from_link <= fake_memory(k);
+			wait until rising_edge(clk);
+		end loop;
+
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
 		wait until rising_edge(clk);
 
 		command <= "100";
@@ -115,45 +128,6 @@ begin
 			wait until rising_edge(clk);
 		end loop;
 		
-	end process;
-
-
-	--for link layer
-	link_stim_process: process
-		variable j : integer range 0 to 32;
-		begin
-
-		--look at link_status logic
-		link_status <= x"00000001";
-		wait until rising_edge(clk);
-
-		wait until transport_status(0) = '1';
-
-		wait until rising_edge(clk);
-		
-		while j < 32 loop
-			if(transport_status(0) = '1') then
-				wait until rising_edge(clk);
-				fake_memory(j) <= data_to_link;
-				j := j + 1;
-			else 
-				wait until rising_edge(clk);
-			end if;
-			
-		end loop;
-
-
-
-		wait until rising_edge(clk);
-		wait until command = "010";
-		wait until rising_edge(clk);
-		
-
-		for k in 0 to 31 loop
-			data_from_link <= fake_memory(k);
-			wait until rising_edge(clk);
-		end loop;
-	
 	end process;
 
 end architecture;

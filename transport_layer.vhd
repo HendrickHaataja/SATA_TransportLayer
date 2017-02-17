@@ -350,12 +350,31 @@ begin
 --============================================================================
 --============================================================================
 	--update status vectors
+	
+	
 	status_to_user(0) <= '1'; --having device always be ready for now
-	status_to_user(1) <= '1' when (tx_full(0) = '0' or tx_full(1) = '0') else '0';
-	status_to_user(2) <= '1' when (rx_full(0) = '0' or rx_full(1) = '0') else '0';
-	status_to_user(3) <= '1' when (rx_empty(0) = '0' or rx_empty(1) = '0') else '0';
 	
-	
+	update_status : process(state, tx_full, rx_full, rx_empty)
+		begin
+		
+		if ((tx_full(0) = '0' or tx_full(1) = '0') and state = transport_idle) then
+			status_to_user(1) <= '1';
+		else
+				status_to_user(1) <= '0';	
+		end if;
+
+		if ((rx_full(0) = '0' or rx_full(1) = '0') and state = transport_idle) then
+			status_to_user(2) <= '1';
+		else
+				status_to_user(2) <= '0';	
+		end if;
+		
+		if (rx_empty(0) = '0' or rx_empty(1) = '0') then
+			status_to_user(3) <= '1';
+		else
+				status_to_user(3) <= '0';	
+		end if;
+	end process;
 	
 	--assignments for testing purposes
 	link_is_idle <= link_status (0);
