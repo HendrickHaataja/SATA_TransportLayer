@@ -6,12 +6,12 @@ package transport_layer_pkg is
 
 --	generic(DATA_WIDTH : integer := 32);
 constant DATA_WIDTH : integer := 32;
-
+constant WRITE_SECTOR_COUNT : std_logic_vector(15 downto 0) := x"0001";
 
 --States for Transport FSM
   type State_Type is (
 					--Initial "Main" State	
-					transport_idle, 
+					transport_reset, transport_idle, 
 					
 					decode_fis, --Do we need to wait for device signature -- I don't know if we need this?
 					
@@ -21,6 +21,7 @@ constant DATA_WIDTH : integer := 32;
 					--DMA Write States  --PRELIMINARY
 					 dma_write_idle, dma_write_reg_fis_0,
 					 dma_write_reg_fis_1, dma_write_reg_fis_2,
+					 dma_write_reg_fis_3,dma_write_reg_fis_4,
 					 dma_write_chk_activate, dma_write_data_fis,
 					 dma_write_data_frame,	dma_write_chk_status, 
 					--================================================						
@@ -29,6 +30,7 @@ constant DATA_WIDTH : integer := 32;
 					--DMA Read States --PRELIMINARY
 					 dma_read_idle, dma_read_reg_fis_0,
 					 dma_read_reg_fis_1, dma_read_reg_fis_2,
+					 dma_read_reg_fis_3, dma_read_reg_fis_4,					 
 					 dma_read_data_fis, dma_read_data_frame,
 					 dma_read_chk_status 
 					--================================================								
