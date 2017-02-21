@@ -88,7 +88,7 @@ begin
 		command <= "001";
 		user_addr_in <= x"FFFFFFFF";
 		sending_data <= '1';
-		wait until rising_edge(clk);
+		--wait until rising_edge(clk);--
 		for i in 0 to 31 loop
 			user_data_in <= std_logic_vector(to_unsigned(i, 32));
 			wait until rising_edge(clk);
@@ -129,6 +129,20 @@ begin
 		end loop;
 		data_from_link <= x"00000039";
 		wait until rising_edge(clk);
+
+--===============================================
+		--IF transport layer is done sending data
+		--send back status device to host register fis
+
+		wait until transport_status(0) = '0';
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
+		data_from_link <= x"00000034";
+		wait until rising_edge(clk);
+--===============================================
+
+
 		--wait until rising_edge(clk);
 --		
 --		while j < 32 loop

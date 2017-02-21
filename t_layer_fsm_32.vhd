@@ -119,7 +119,7 @@ architecture t_layer_fsm_32_arch of t_layer_fsm_32 is
 	signal link_fis_rdy : std_logic;
 	signal link_fis_type : std_logic_vector(7 downto 0);
 
-	--CONSTANTS UPDATE WITH VALUES
+	--CONSTANTS UPDATE WITH CORRECT VALUES!!!!!
 	constant STATUS_ERR : integer := 0;
 	constant STATUS_DF : integer := 0;
 	constant STATUS_BSY : integer := 0;
@@ -154,7 +154,7 @@ begin
 		end if;
 	end process;
 
-	transport_next_state_logic: process (current_state, link_status, tx_full(1), tx_full(0), tx_almost_full(0), tx_almost_empty(0), tx_empty, user_command)
+	transport_next_state_logic: process (current_state, link_status, tx_full(1), tx_full(0), tx_almost_full(0), tx_almost_empty(0), tx_empty, user_command,rst_n)
       begin 
 	  
 		case (current_state) is
@@ -198,7 +198,7 @@ begin
 			when dma_write_reg_fis_2	=>	next_state <= dma_write_reg_fis_3;
 			when dma_write_reg_fis_3	=>	next_state <= dma_write_reg_fis_4;			
 			when dma_write_reg_fis_4	=> 	next_state <= dma_write_chk_activate;
-			when dma_write_chk_activate	=> 
+			when dma_write_chk_activate	=> --update to ensure state waits for activate FIS to proceed
 				if(link_status = x"00000001") then --FIS RECEIVED
 					if(link_fis_type = DMA_ACTIVATE_FIS) then			 
 						next_state <= dma_write_data_fis;	--start transmitting data FIS
@@ -213,15 +213,16 @@ begin
 			when dma_write_data_frame	=> ----UPDATE THIS STATE
 				if(tx_empty(tx_index) = '0') then
 					--tx0_rdreq(tx_index) <= '1'; --will this update in time?
+					next_state <= dma_write_data_frame;
 				else
 					next_state <= dma_write_chk_status;
 				end if;
-			when dma_write_chk_status	=>  ----UPDATE THIS STATE
-				if(link_fis_rdy = '1' and rx_data_in (7 downto 0) = REG_DEVICE_TO_HOST) then
+			when dma_write_chk_status	=>  ----UPDATE THIS STATE, BROKEN CURRENTLY
+				if(link_fis_type = REG_DEVICE_TO_HOST) then --link_fis_rdy = '1' and rx_data_in (7 downto 0)
 					--check error bit and device fault bit in the  Status field.. if error is asserted can check error field
 					--TODO: create constants for ERROR, DEV_FAULT, etc
 					if(rx_data_in(STATUS_ERR) = '1' or rx_data_in(STATUS_DF) = '1') then
-					--error occured
+					--error occured, update this part!
 						next_state <= transport_idle;
 					elsif(rx_data_in(STATUS_BSY) = '0') then
 						next_state <= transport_idle;	--Go back to transport idle?
@@ -250,13 +251,13 @@ begin
 					next_state <= dma_read_data_frame;
 				end if;
 			when dma_read_data_frame	=> 
-				--if(rx_data_in_valid and rx_buffer_not_full) then
-					--rx_buffer_in <= rx_data_in;
-				--else
+				if(rx_full(rx_index) = '0') then --and data valid???
+					next_state <= dma_read_data_frame; --make sure this doesnt cause bugs because current_state is not updating??
+				else
 					next_state <= dma_read_chk_status;
-				--end if;
+				end if;
 			when dma_read_chk_status	=>  ----UPDATE THIS STATE
-				if(link_status = x"00000001") then	--DONE		 
+				if(link_status = x"00000001") then			 
 					next_state <= transport_idle;	--Go back to transport idle?
 	--			elsif(error) then
 	--				give up
@@ -267,7 +268,7 @@ begin
     end process;
 --=================================================================================================================
 
-	transport_output_logic:	process (current_state, link_status, tx_full, tx_almost_full, tx_almost_empty, tx_empty, tx_q, user_command)
+	transport_output_logic:	process (current_state, link_status, rx_data_in, tx_full, tx_almost_full, tx_almost_empty, tx_empty, tx_q, user_command)
 	  begin 
 		case (current_state) is
 		-----------------------------------------------	-----------------------------------------------	
@@ -367,13 +368,26 @@ begin
 				tx_data_out <=  x"000000" & DATA_FIS; 
 				tx_rdreq(tx_index) <= '1';-- Need to update rdreq signal a clock cycle before data is desired
 			when dma_write_data_frame	=> ----UPDATE THIS STATE
-				if(tx_empty(tx_index) = '0') then
-					--tx0_rdreq(tx_index) <= '1'; --will this update in time?
-					tx_data_out <= tx_q(tx_index);	--start transmitting data frame
-				else
-					tx_rdreq(tx_index) <= '0'; 
-				end if;
-				
+				--if(tx_empty(tx_index) = '0') then
+				--	--tx0_rdreq(tx_index) <= '1'; --will this update in time?
+				--	tx_data_out <= tx_q(tx_index);	--start transmitting data frame
+				--else
+				--	tx_rdreq(tx_index) <= '0'; 
+				--end if;
+				status_to_link(0) <= '1'; --FOR TEST!! update after interface discussion
+				tx_data_out <= tx_q(tx_index);	--took this out of if statement so last value is still latched out
+				--if(tx_empty(tx_index) = '0') then
+				--	state <= dma_write_data_frame;
+				--else
+				if(tx_empty(tx_index) = '1') then
+					tx_rdreq(tx_index) <= '0';
+					status_to_link(0) <= '0';
+					if(tx_index = 0) then
+						tx0_locked <= '0';
+					else
+						tx1_locked <= '0';
+					end if;
+				end if;				
 			when dma_write_chk_status	=>  ----UPDATE THIS STATE
 				if(link_fis_rdy = '1' and rx_data_in (7 downto 0) = REG_DEVICE_TO_HOST) then
 					--check error bit and device fault bit in the  Status field.. if error is asserted can check error field
@@ -391,10 +405,21 @@ begin
 			-- DMA Read EXT SM states
 			--TODO: create state logic/assignments, check last states, create missing signals
 			when dma_read_idle	  	=> 
-				if (link_is_idle = '1') then
-					--transmit register fis
-				else 
-				end if;
+				status_to_link(0) <= '1';
+				--build register host to device DMA Read FIS
+				rx_fis_array(rx_index).fis_type <= REG_HOST_TO_DEVICE;
+				rx_fis_array(rx_index).crrr_pm <= x"00";
+				rx_fis_array(rx_index).command <= READ_DMA_EXT;
+				rx_fis_array(rx_index).features <= x"00";
+				rx_fis_array(rx_index).lba <= lba(23 downto 0);
+				rx_fis_array(rx_index).device <= x"40";
+				rx_fis_array(rx_index).features_ext <= x"00";
+				rx_fis_array(rx_index).lba_ext <= lba(47 downto 24);
+				rx_fis_array(rx_index).count <= WRITE_SECTOR_COUNT; --on most drives 1 logical sector := 512 bytes
+				rx_fis_array(rx_index).icc <= x"00";
+				rx_fis_array(rx_index).control <= x"00";				
+				rx_fis_array(rx_index).aux <= x"00000000";
+
 			when dma_read_reg_fis_0	=> 
 				tx_data_out <= rx_fis_array(rx_index).features & rx_fis_array(rx_index).command &
 							   rx_fis_array(rx_index).crrr_pm & rx_fis_array(rx_index).fis_type;
@@ -411,15 +436,26 @@ begin
 				--SET DEVICE BUSY BIT?
 
 			
-			when dma_read_data_fis	=> 
-				if(link_fis_rdy = '1' and rx_data_in(7 downto 0)= DATA_FIS) then
+			when dma_read_data_fis	=> --pick a buffer
+				if(rx_full(0) = '0') then
+					rx_index <= 0;
+					rx0_locked <= '1';
+				elsif(rx_full(1) = '0') then
+					rx_index <= 1;
+					rx1_locked <= '1';
 				end if;
-			when dma_read_data_frame	=> 
-				--if(rx_data_in_valid and rx_buffer_not_full) then
-					--rx_buffer_in <= rx_data_in;
-				--else
-
-				--end if;
+			when dma_read_data_frame	=> --store data into rx buffer
+				if(rx_full(rx_index) = '0') then-- and data_valid = '1') then --data valid flag saying data from link is coming
+					rx_wrreq(rx_index) <= '1';
+					rx_data(rx_index) <= rx_data_in;
+				else
+					rx_wrreq(rx_index) <= '0';
+					if(rx_index = 0) then	
+						rx0_locked <= '0';
+					else					
+						rx1_locked <= '0';	
+					end if;				
+				end if;
 			when dma_read_chk_status	=>  ----UPDATE THIS STATE
 				if(link_status = x"00000001") then			 
 
@@ -468,6 +504,10 @@ begin
 					tx_wrreq(0) <= '0';
 				else
 				--ERROR, write invalid
+					tx_wrreq(0) <= '0';
+					tx_wrreq(1) <= '0';
+					tx0_read_valid <= '0';
+					tx1_read_valid <= '0';
 				end if;
 			else
 				tx_wrreq(0) <= '0';
@@ -529,6 +569,7 @@ rx_buffer_control_reads : process(clk, rst_n)
 --============================================================================
 	--update status vectors
 	status_to_user(0) <= '1'; --having device always be ready for now
-
+	link_fis_rdy <= link_status(1);
 	link_is_idle <= link_status (0);
+	status_to_link(7 downto 1) <= "0000000"; --REMOVE THIS LATER
 end architecture;
