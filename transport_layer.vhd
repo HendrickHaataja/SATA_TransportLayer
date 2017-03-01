@@ -370,7 +370,7 @@ begin
 		end if;
 		
 		if (rx_empty(0) = '0' or rx_empty(1) = '0') then
-			status_to_user(3) <= '1';
+			status_to_user(3) <= '1';	
 		else
 				status_to_user(3) <= '0';	
 		end if;

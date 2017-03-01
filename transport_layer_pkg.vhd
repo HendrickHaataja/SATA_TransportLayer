@@ -22,8 +22,9 @@ constant WRITE_SECTOR_COUNT : std_logic_vector(15 downto 0) := x"0001";
 					 dma_write_idle, dma_write_reg_fis_0,
 					 dma_write_reg_fis_1, dma_write_reg_fis_2,
 					 dma_write_reg_fis_3,dma_write_reg_fis_4,
-					 dma_write_chk_activate, dma_write_data_fis,
-					 dma_write_data_frame,	dma_write_chk_status, 
+					 dma_write_chk_activate, dma_write_data_idle,
+					 dma_write_data_fis, dma_write_data_frame,	
+					 dma_write_chk_status, pause_data_tx,
 					--================================================						
 							
 					--================================================

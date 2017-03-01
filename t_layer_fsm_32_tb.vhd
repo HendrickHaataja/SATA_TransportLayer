@@ -96,13 +96,25 @@ begin
 		wait until rising_edge(clk);
 		sending_data <= '0';		
 		
-		--command <= "000";
+		command <= "000";
 		wait until rising_edge(clk);
 		--wait for read valid flag
 		wait until rising_edge(clk);
-		for j in 0 to 31 loop
+		for j in 0 to 63 loop
 			wait until rising_edge(clk);
 		end loop;
+
+		--should be able to send read command now
+		
+		command <= "010";
+		user_addr_in <= x"EEEEEEEE";
+		wait until rising_edge(clk);
+		for k in 0 to 60 loop
+			wait until rising_edge(clk);
+		end loop;
+		--wait until status(3) = '1';
+		--wait until rising_edge(clk);
+
 
 		
 	end process;
@@ -114,7 +126,7 @@ begin
 		begin
 
 		--look at link_status logic
-		link_status <= x"00000001";
+		link_status <= x"000000BF";
 		wait until rising_edge(clk);
 		
 		for m in 0 to 15 loop
@@ -140,11 +152,45 @@ begin
 		wait until rising_edge(clk);
 		data_from_link <= x"00000034";
 		wait until rising_edge(clk);
---===============================================
+--==============================================
+--==============================================
+--==============================================
+--==============================================
+--==============================================
+--==============================================
+		--look at link_status logic
+		link_status <= x"000000BF";
+		wait until rising_edge(clk);
+		
+		wait until transport_status(0) = '1';
+		wait until rising_edge(clk);
 
+		for k in 0 to 10 loop
+			wait until rising_edge(clk);
+		end loop;
+		data_from_link <= x"00000039";
+		wait until rising_edge(clk);
+
+--===============================================
+		--IF transport layer is done sending data
+		--send back status device to host register fis
+
+		wait until transport_status(0) = '0';
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
+		wait until rising_edge(clk);
+		data_from_link <= x"00000034";
+		wait until rising_edge(clk);
+
+		link_status <= x"00000000"; --not allowed to send commands from transport
+		wait until rising_edge(clk);
+		wait until transport_status(0) = '1';
+
+		wait until rising_edge(clk);		
+		link_status <= x"000000BF";
 
 		--wait until rising_edge(clk);
---		
+
 --		while j < 32 loop
 --			if(transport_status(0) = '1') then
 --				wait until rising_edge(clk);
@@ -155,7 +201,14 @@ begin
 --			end if;
 			
 --		end loop;
+		wait until transport_status(1) = '1';
+		data_from_link <= x"00000046";
+		wait until rising_edge(clk);
 
+		for k in 0 to 15 loop
+			data_from_link <= std_logic_vector(to_unsigned(k, 32));
+			wait until rising_edge(clk);
+		end loop;
 
 
 		wait until rising_edge(clk);
