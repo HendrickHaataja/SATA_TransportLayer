@@ -20,7 +20,7 @@ use work.transport_layer_pkg.all;
 -- X10 == Send Read		 (Command to retrieve data at specified address from SSD)
 -- 1XX == Retrieve Read  (Command to read value from Rx buffer)
 ----------------------------------------------------------------------------
-entity transport_layer is
+entity t_layer_fsm_64 is
    port(
 		--Interface with Application Layer
 		rst_n			:	in std_logic;
@@ -41,7 +41,7 @@ entity transport_layer is
 		tx_data_out		:	out std_logic_vector(DATA_WIDTH - 1 downto 0);
 		rx_data_in		:	in std_logic_vector(DATA_WIDTH - 1 downto 0));
 
-end transport_layer;
+end t_layer_fsm_64;
 
 architecture transport_layer_arch of transport_layer is
 --States for Transport FSM
