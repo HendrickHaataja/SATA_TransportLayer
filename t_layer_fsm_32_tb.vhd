@@ -133,7 +133,7 @@ begin
 			wait until rising_edge(clk);
 		end loop;
 		
-		wait until transport_status(0) = '1';
+		wait until transport_status(5) = '1';
 		wait until rising_edge(clk);
 
 		for k in 0 to 10 loop
@@ -146,14 +146,12 @@ begin
 		--IF transport layer is done sending data
 		--send back status device to host register fis
 
-		wait until transport_status(0) = '0';
+		wait until transport_status(5) = '0';
 		wait until rising_edge(clk);
 		wait until rising_edge(clk);
 		wait until rising_edge(clk);
 		data_from_link <= x"00000034";
 		wait until rising_edge(clk);
---==============================================
---==============================================
 --==============================================
 --==============================================
 --==============================================
@@ -162,7 +160,7 @@ begin
 		link_status <= x"000000BF";
 		wait until rising_edge(clk);
 		
-		wait until transport_status(0) = '1';
+		wait until transport_status(5) = '1';
 		wait until rising_edge(clk);
 
 		for k in 0 to 10 loop
@@ -175,7 +173,7 @@ begin
 		--IF transport layer is done sending data
 		--send back status device to host register fis
 
-		wait until transport_status(0) = '0';
+		wait until transport_status(5) = '0';
 		wait until rising_edge(clk);
 		wait until rising_edge(clk);
 		wait until rising_edge(clk);
@@ -184,7 +182,7 @@ begin
 
 		link_status <= x"00000000"; --not allowed to send commands from transport
 		wait until rising_edge(clk);
-		wait until transport_status(0) = '1';
+		wait until transport_status(5) = '1';
 
 		wait until rising_edge(clk);		
 		link_status <= x"000000BF";
@@ -201,7 +199,7 @@ begin
 --			end if;
 			
 --		end loop;
-		wait until transport_status(1) = '1';
+		wait until transport_status(6) = '1';
 		data_from_link <= x"00000046";
 		wait until rising_edge(clk);
 
@@ -212,7 +210,8 @@ begin
 
 
 		wait until rising_edge(clk);
---
+		data_from_link <= x"00000034";
+
 	end process;
 
 end architecture;
