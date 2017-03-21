@@ -1,0 +1,15 @@
+Problems to deal with:
+
+all files:
+1. conform to coding standards
+
+rate_match_blk:
+1. clear and reset should be separate signals
+2. should we do show ahead or normal?
+3. more logic around empty/not empty, map datak and data to ALIGNp when tx_empty, rx_full
+4. add flag for when rate match block is transmitting invalid data
+5. Glitch in check for rx/tx_readreq and readreqprev---.... one clock of invalid
+
+phy init main blk:
+1. do we need to act on phy clear status? why is this included in the signal
+2. remove combinational logic...
