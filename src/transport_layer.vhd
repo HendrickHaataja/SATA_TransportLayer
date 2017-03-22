@@ -37,7 +37,7 @@ entity transport_layer is
 
         --Interface with Link Layer
         status_to_link :    out std_logic_vector(7 downto 0); --for test just use bit 0 to indicate data ready
-        status_from_link     :   in std_logic_vector(6 downto 0);
+        status_from_link     :   in std_logic_vector(7 downto 0);
         data_to_link     :   out std_logic_vector(DATA_WIDTH - 1 downto 0);
         data_from_link      :   in std_logic_vector(DATA_WIDTH - 1 downto 0));
 
@@ -89,9 +89,12 @@ architecture transport_layer_arch of transport_layer is
     --temporary signal for testing
     signal tx0_read_valid, tx1_read_valid, rx0_read_valid, rx1_read_valid : std_logic;
 
+    --
+    signal device_ready : std_logic;
+
     --from link interface status signals
-    signal link_rdy : std_logic;
-    signal pause    : std_logic;
+    signal link_rdy, pause, data_from_link_valid : std_logic;
+
     --to link interface status signals
     signal tx_to_link_request : std_logic;
     signal rx_from_link_ready : std_logic;
@@ -134,11 +137,61 @@ begin
                 if(rst_n = '0') then
                     next_state <= transport_reset;
                 else
-                    next_state <= transport_idle;
+                    next_state <= transport_init;
                 end if;
+            when transport_init =>
+                if(data_from_link_valid = '1' and data_from_link(7 downto 0) = REG_DEVICE_TO_HOST)then--received initial status update
+                    next_state <= identify_device_0;
+                else 
+                    next_state <= transport_init;
+                end if;
+            when identify_device_0    =>
+                if(link_rdy = '1' and pause = '0')then
+                    next_state <= identify_device_1;
+                else
+                    next_state <= identify_device_0;
+                end if;
+            when identify_device_1    =>
+                if(link_rdy = '1' and pause = '0')then
+                    next_state <= identify_device_2;
+                else
+                    next_state <= identify_device_1;
+                end if;
+            when identify_device_2    =>
+                if(link_rdy = '1' and pause = '0')then
+                    next_state <= identify_device_3;
+                else
+                    next_state <= identify_device_2;
+                end if;
+            when identify_device_3    =>
+                if(link_rdy = '1' and pause = '0')then
+                    next_state <= identify_device_4;
+                else
+                    next_state <= identify_device_3;
+                end if;
+            when identify_device_4    =>
+                if(link_rdy = '1' and pause = '0')then
+                    next_state <= rx_pio_setup;
+                else
+                    next_state <= identify_device_4;
+                end if;
+            when rx_pio_setup =>
+                if(link_fis_type = PIO_SETUP_FIS) then--and link fis  received?
+                    next_state <= rx_identify_packet;
+                    --next_state <= dma_write_data_idle;
+                else
+                    next_state <= rx_pio_setup;
+                end if;
+            when rx_identify_packet =>
+                  if(link_fis_type = DATA_FIS)then--and link fis  received?
+                        next_state <= transport_idle;
+                  else 
+                       next_state <= rx_identify_packet;
+                  end if;
+
             when transport_idle =>
                 --if (status_from_link = x"00000001") then --FIS RECEIVED
-                    --next_state <= decode_fis; --is this how we should do this?
+                    --next_state <= decode_fis;
                 if (tx_buffer_full(0) = '1') then   --User is sending "Write" command --Don't transition to DMA Write until a buffer is full
                     next_state <= dma_write_idle;
                 elsif (tx_buffer_full(1) = '1') then
@@ -332,7 +385,10 @@ begin
                 
             tx_read_ptr <= 0;
             rx_write_ptr <= 0;
-        
+
+            tx_index <= 0;        
+            device_ready <= '0';
+            data_to_link <= (others => '0');        
         elsif(rising_edge(clk))then
         case (current_state) is
         ----------------------------------------------- -----------------------------------------------
@@ -357,12 +413,50 @@ begin
 
                 tx_read_ptr <= 0;
                 rx_write_ptr <= 0;
+
+                tx_index <= 0;        
+                device_ready <= '0';
+                data_to_link <= (others => '0');
+            when transport_init =>
+                rx_from_link_ready <= '1';
+                tx_fis_array(tx_index).fis_type <= REG_HOST_TO_DEVICE;
+                tx_fis_array(tx_index).crrr_pm <= x"80"; --80 sets C bit
+                tx_fis_array(tx_index).command <= IDENTIFY_DEVICE;
+                tx_fis_array(tx_index).features <= x"00";
+                tx_fis_array(tx_index).lba <= (others => '0');
+                tx_fis_array(tx_index).device <= x"E0";
+                tx_fis_array(tx_index).features_ext <= x"00";
+                tx_fis_array(tx_index).lba_ext <= (others => '0');
+                tx_fis_array(tx_index).count <= (others => '0'); --on most drives 1 logical sector := 512 bytes
+                tx_fis_array(tx_index).icc <= x"00";
+                tx_fis_array(tx_index).control <= x"00";
+                tx_fis_array(tx_index).aux <= x"00000000";    
+            when identify_device_0 =>
+                tx_to_link_request <= '1';
+                data_to_link <= tx_fis_array(tx_index).features & tx_fis_array(tx_index).command &
+                               tx_fis_array(tx_index).crrr_pm & tx_fis_array(tx_index).fis_type;
+            when identify_device_1 =>
+                data_to_link <= tx_fis_array(tx_index).device & tx_fis_array(tx_index).lba;            
+            when identify_device_2 =>   
+                data_to_link <= tx_fis_array(tx_index).features_ext &
+                                tx_fis_array(tx_index).lba_ext;            
+            when identify_device_3 =>
+                data_to_link <= tx_fis_array(tx_index).control & tx_fis_array(tx_index).icc &
+                                tx_fis_array(tx_index).count;
+            when identify_device_4 =>
+                data_to_link <= tx_fis_array(tx_index).aux;
+            when rx_pio_setup =>
+                tx_to_link_request <= '0';--request to send data
+                rx_from_link_ready <= '1';--request to receive data
+                data_to_link <= x"AAAAAAAA";
+            when rx_identify_packet =>
+                data_to_link <= x"BBBBBBBB";            
             when transport_idle =>
+                device_ready <= '1';
                 rx_from_link_ready <= '0';
                 tx_to_link_request <= '0';
-                if (status_from_link = "1111111") then --FIS RECEIVED
-
-                elsif (tx_buffer_full(0) = '1') then   --User is sending "Write" command --Don't transition to DMA Write until a buffer is full
+                --if (status_from_link = FIS_RDY) then --FIS RECEIVED
+                if (tx_buffer_full(0) = '1') then   --User is sending "Write" command --Don't transition to DMA Write until a buffer is full
                     --Build register FIS?
                     --lock tx0 buffer
                     tx0_locked <= '1';
@@ -648,22 +742,21 @@ rx_buffer_control_reads : process(clk, rst_n)
     link_fis_type <= data_from_link(7 downto 0);
 --============================================================================
     --update status vectors (In Beta)
-    status_to_user(0) <= '1'; --having device always be ready for now
+    status_to_user(0) <= device_ready;
 
-    update_status : process(current_state, tx_buffer_full, rx_buffer_full, rx_buffer_empty, rx0_locked, rx1_locked)
+    update_status : process(current_state, tx_buffer_full, rx_buffer_full, rx_buffer_empty, rx0_locked, rx1_locked,tx0_locked,tx1_locked)
         begin
-        if ((tx_buffer_full(0) = '0' or tx_buffer_full(1) = '0') and current_state = transport_idle) then
+        if (((tx_buffer_full(0) = '0' and tx0_locked = '0') or (tx_buffer_full(1) = '0' and tx1_locked = '0')) and current_state = transport_idle) then--this needs to be able to work when current_state != trans_idle
             status_to_user(1) <= '1';
         else
                 status_to_user(1) <= '0';
         end if;
-
-        if ((rx_buffer_full(0) = '0' or rx_buffer_full(1) = '0') and current_state = transport_idle) then
+        --if ((rx_buffer_full(0) = '0' and rx0_locked = '0') or (rx_buffer_full(1) = '0' and rx1_locked = '0')) then--add transmit read count flag??
+        if (((rx_buffer_empty(0) = '1' and rx0_locked = '0') or (rx_buffer_empty(1) = '1' and rx1_locked = '0')) and current_state = transport_idle) then    
             status_to_user(2) <= '1';
         else
                 status_to_user(2) <= '0';
         end if;
-
         if ((rx_buffer_empty(0) = '0' and rx0_locked = '0') or (rx_buffer_empty(1) = '0' and rx1_locked = '0')) then
             status_to_user(3) <= '1';
         else
@@ -674,5 +767,6 @@ rx_buffer_control_reads : process(clk, rst_n)
     --status assignments
     link_rdy <= status_from_link (5);
     pause <= status_from_link(6);
+    data_from_link_valid <= status_from_link(7);
     status_to_link <= "0" & rx_from_link_ready & tx_to_link_request & "00000";
 end architecture;

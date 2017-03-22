@@ -21,7 +21,7 @@ entity top_sim is
             
         --Interface with Link Layer
         status_to_link_top :    out std_logic_vector(7 downto 0); --for test just use bit 0 to indicate data ready
-        status_from_link_top     :   in std_logic_vector(6 downto 0);
+        status_from_link_top     :   in std_logic_vector(7 downto 0);
         data_to_link_top     :   out std_logic_vector(DATA_WIDTH - 1 downto 0);
         data_from_link_top      :   in std_logic_vector(DATA_WIDTH - 1 downto 0)
 
@@ -91,7 +91,7 @@ architecture top_sim_arch of top_sim is
     signal rx_data_to_link          : std_logic_vector(31 downto 0);
 
     signal trans_status_in          : std_logic_vector(7 downto 0);
-    signal trans_status_out         : std_logic_vector(6 downto 0);
+    signal trans_status_out         : std_logic_vector(7 downto 0);
     signal trans_tx_data_in         : std_logic_vector(31 downto 0);
     signal trans_rx_data_out        : std_logic_vector(31 downto 0);
     signal rst_n                    : std_logic;
@@ -108,6 +108,7 @@ architecture top_sim_arch of top_sim is
     signal app_control_counter : integer range 0 to 1000001;
     signal app_data_counter : integer range 0 to BUFFER_DEPTH;
 
+    signal msata_device_ready : std_logic;
     signal app_write_valid : std_logic;
     signal app_send_read_valid : std_logic;
     signal app_receive_read_valid : std_logic;
@@ -121,7 +122,7 @@ architecture top_sim_arch of top_sim is
 
                 --Interface with link Layer
                 trans_status_to_link:   out std_logic_vector(7 downto 0);  -- [FIFO_RDY/n, transmit request, data complete, escape, bad FIS, error, good FIS]
-                link_status_to_trans:   in  std_logic_vector(6 downto 0);  -- [Link Idle, transmit bad status, transmit good status, crc good/bad, comm error, fail transmit]
+                link_status_to_trans:   in  std_logic_vector(7 downto 0);  -- [Link Idle, transmit bad status, transmit good status, crc good/bad, comm error, fail transmit]
                 tx_data_to_link     :   out std_logic_vector(31 downto 0);
                 rx_data_from_link   :   in  std_logic_vector(31 downto 0)
                 );
@@ -144,7 +145,7 @@ architecture top_sim_arch of top_sim is
 
             --Interface with Link Layer
             status_to_link :    out std_logic_vector(7 downto 0); --for test just use bit 0 to indicate data ready
-            status_from_link     :   in std_logic_vector(6 downto 0);
+            status_from_link     :   in std_logic_vector(7 downto 0);
             data_to_link     :   out std_logic_vector(DATA_WIDTH - 1 downto 0);
             data_from_link      :   in std_logic_vector(DATA_WIDTH - 1 downto 0));
 
@@ -157,7 +158,7 @@ architecture top_sim_arch of top_sim is
 
             --Interface with Transport Layer
             trans_status_in :   in std_logic_vector(7 downto 0);        -- [FIFO_RDY/n, transmit request, data complete, escape, bad FIS, error, good FIS]
-            trans_status_out:   out std_logic_vector(6 downto 0);       -- [Link Idle, transmit bad status, transmit good status, crc good/bad, comm error, fail transmit]
+            trans_status_out:   out std_logic_vector(7 downto 0);       -- [Link Idle, transmit bad status, transmit good status, crc good/bad, comm error, fail transmit]
             tx_data_in      :   in std_logic_vector(31 downto 0);
             rx_data_out     :   out std_logic_vector(31 downto 0);
 
@@ -266,61 +267,64 @@ architecture top_sim_arch of top_sim is
             app_control_counter <= 0;
             app_read_sent <= '0';
         elsif(rising_edge(clk50))then
-            if(app_control_counter < (2 * BUFFER_DEPTH))then --send write
-                if(app_write_valid = '1')then
-                    if(app_data_counter < BUFFER_DEPTH)then
-                        user_cmd_to_trans <= "001";--send write
+            if(msata_device_ready = '1')then
+                if(app_control_counter < (2 * BUFFER_DEPTH))then --send write
+                    if(app_write_valid = '1')then
+                        if(app_data_counter < BUFFER_DEPTH)then
+                            user_cmd_to_trans <= "001";--send write
+                            user_address_to_trans <= test_write_address;
+                            user_data_to_trans <= std_logic_vector(to_unsigned(app_data_counter,DATA_WIDTH));
+                            app_data_counter <= app_data_counter + 1;
+                        else
+                            user_cmd_to_trans <= "000";
+                            user_data_to_trans <= (others => '1');
+                            user_address_to_trans <= (others => '1');
+                        end if;
+                        app_control_counter <= app_control_counter + 1;
+                    else
+                        app_control_counter <= app_control_counter;
+                    end if;
+                elsif(app_control_counter < 4 * BUFFER_DEPTH)then --send read
+                    app_data_counter <= 0;
+                    if(app_send_read_valid = '1' and app_read_sent = '0')then
+                        user_cmd_to_trans <= "010";--send read
                         user_address_to_trans <= test_write_address;
-                        user_data_to_trans <= std_logic_vector(to_unsigned(app_data_counter,DATA_WIDTH));
-                        app_data_counter <= app_data_counter + 1;
+                        user_data_to_trans <= (others => '1');
+                        app_read_sent <= '1';
+                    elsif(app_read_sent = '1')then
+                        user_cmd_to_trans <= "000";
+                        app_control_counter <= app_control_counter + 1;
+                    else
+                        app_control_counter <= app_control_counter;
+                    end if;
+                elsif(app_control_counter < 6 * BUFFER_DEPTH)then --retrieve read
+                    if(app_receive_read_valid = '1')then
+                        user_cmd_to_trans <= "100";
+                        user_address_to_trans <= test_write_address;
+                        user_data_to_trans <= (others => '1');
+                        --something <= trans_data_to_user;
                     else
                         user_cmd_to_trans <= "000";
-                        user_data_to_trans <= (others => '1');
-                        user_address_to_trans <= (others => '1');
                     end if;
                     app_control_counter <= app_control_counter + 1;
-                else
-                    app_control_counter <= app_control_counter;
-                end if;
-            elsif(app_control_counter < 4 * BUFFER_DEPTH)then --send read
-                app_data_counter <= 0;
-                if(app_send_read_valid = '1' and app_read_sent = '0')then
-                    user_cmd_to_trans <= "010";--send read
-                    user_address_to_trans <= test_write_address;
-                    user_data_to_trans <= (others => '1');
-                elsif(app_send_read_valid = '0')then
-                    app_read_sent <= '1';
+                elsif(app_control_counter > 8 * BUFFER_DEPTH)then --reset
                     user_cmd_to_trans <= "000";
+                    user_data_to_trans <= (others => '0');
+                    user_address_to_trans <= (others => '0');
+                    app_control_counter <= 0;
+                    app_data_counter <= 0;
+                    app_read_sent <= '0';
+                else --wait and increment
+                    user_cmd_to_trans <= "000";
+                    user_data_to_trans <= (others => '0');
+                    user_address_to_trans <= (others => '0');
                     app_control_counter <= app_control_counter + 1;
-                else
-                    app_control_counter <= app_control_counter;
                 end if;
-            elsif(app_control_counter < 6 * BUFFER_DEPTH)then --retrieve read
-                if(app_receive_read_valid = '1')then
-                    user_cmd_to_trans <= "100";
-                    user_address_to_trans <= test_write_address;
-                    user_data_to_trans <= (others => '1');
-                    --something <= trans_data_to_user;
-                else
-                    user_cmd_to_trans <= "000";
-                end if;
-                app_control_counter <= app_control_counter + 1;
-            elsif(app_control_counter > 8 * BUFFER_DEPTH)then --reset
-                user_cmd_to_trans <= "000";
-                user_data_to_trans <= (others => '0');
-                user_address_to_trans <= (others => '0');
-                app_control_counter <= 0;
-                app_data_counter <= 0;
-                app_read_sent <= '0';
-            else --wait and increment
-                user_cmd_to_trans <= "000";
-                user_data_to_trans <= (others => '0');
-                user_address_to_trans <= (others => '0');
-                app_control_counter <= app_control_counter + 1;
             end if;
         end if;
     end process;
     
+    msata_device_ready <= trans_status_to_user(0);
     app_write_valid <= trans_status_to_user(1);
     app_send_read_valid <= trans_status_to_user(2);
     app_receive_read_valid <= trans_status_to_user(3);

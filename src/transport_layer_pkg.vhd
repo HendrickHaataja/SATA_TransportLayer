@@ -12,7 +12,11 @@ package transport_layer_pkg is
 	  type State_Type is (
 
 	                    transport_reset, transport_idle,
-	    
+						--================================================
+	                    --Init States	    				
+	                    transport_init, identify_device_0, identify_device_1,
+	                    identify_device_2, identify_device_3, identify_device_4,
+	                    rx_pio_setup, rx_identify_packet,
 	                    --================================================
 	                    --DMA Write States  --PRELIMINARY
 	                     dma_write_idle, dma_write_reg_fis_0,
@@ -33,17 +37,15 @@ package transport_layer_pkg is
 	                    --================================================
 	                    );
 	--======================================================================================
-	  -- Type Field Values of supported SATA Frame Information Structures (FIS)
-	  -- Supported Register FIS Type Field Value
-	  constant REG_HOST_TO_DEVICE   : std_logic_vector(7 downto 0) := x"27";  --5 Dwords
-	  constant REG_DEVICE_TO_HOST   : std_logic_vector(7 downto 0) := x"34";
+	-- Type Field Values of supported SATA Frame Information Structures (FIS)
+	-- Supported Register FIS Type Field Value
+	constant REG_HOST_TO_DEVICE   : std_logic_vector(7 downto 0) := x"27";
+	constant REG_DEVICE_TO_HOST   : std_logic_vector(7 downto 0) := x"34";
+	constant PIO_SETUP_FIS		: std_logic_vector(7 downto 0) := x"5F";
 
-	  -- Supported DMA FIS Type Field Value
-	  constant DMA_ACTIVATE_FIS     : std_logic_vector(7 downto 0) := x"39"; --Device to Host -- 1 dword
+	constant DMA_ACTIVATE_FIS     : std_logic_vector(7 downto 0) := x"39"; --Device to Host -- 1 dword
 	  --constant DMA_SETUP_FIS      : std_logic_vector(7 downto 0) := x"41"; --Bidirectional  -- 7 dwords --not using
-
-	  -- Data FIS type field value
-	  constant DATA_FIS             : std_logic_vector(7 downto 0) := x"46"; --Bidirectional
+	constant DATA_FIS             : std_logic_vector(7 downto 0) := x"46"; --Bidirectional
 	--======================================================================================
 
 
@@ -52,6 +54,7 @@ package transport_layer_pkg is
 	--need EXT commands to support 48 bit address
 	constant READ_DMA_EXT   : std_logic_vector(7 downto 0) := x"25";
 	constant WRITE_DMA_EXT  : std_logic_vector(7 downto 0) := x"35";
+	constant IDENTIFY_DEVICE : std_logic_vector(7 downto 0) := x"EC";
 	--======================================================================================
 
 	--Record type for Host to Device register FIS

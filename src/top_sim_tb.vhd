@@ -16,9 +16,12 @@ architecture top_sim_tb_arch of top_sim_tb is
 
 	--Interface with Link Layer
 	signal status_to_link_tb : std_logic_vector(7 downto 0); --for test just use bit 0 to indicate data ready
-	signal status_from_link_tb : std_logic_vector(6 downto 0);
+	signal status_from_link_tb : std_logic_vector(7 downto 0);
 	signal data_to_link_tb : std_logic_vector(DATA_WIDTH - 1 downto 0);
 	signal data_from_link_tb : std_logic_vector(DATA_WIDTH - 1 downto 0);
+
+
+	signal trans_rx_from_link_ready, trans_tx_to_link_ready : std_logic;
 
 	constant clk_period : time := 1 ns; --not accurate to device
 
@@ -37,7 +40,7 @@ architecture top_sim_tb_arch of top_sim_tb is
 	            
 	        --Interface with Link Layer
 	        status_to_link_top :    out std_logic_vector(7 downto 0); --for test just use bit 0 to indicate data ready
-	        status_from_link_top     :   in std_logic_vector(6 downto 0);
+	        status_from_link_top     :   in std_logic_vector(7 downto 0);
 	        data_to_link_top     :   out std_logic_vector(DATA_WIDTH - 1 downto 0);
 	        data_from_link_top      :   in std_logic_vector(DATA_WIDTH - 1 downto 0)
         );
@@ -73,7 +76,13 @@ begin
 		wait for 8 ns;
 		rst_n <= '0'; wait for 10 ns;
 		rst_n <= '1'; wait until rising_edge(clk);
-		status_from_link_tb <= "0111111"; wait until rising_edge(clk);
+		status_from_link_tb <= "10111111"; wait until rising_edge(clk);
+		data_from_link_tb <= x"000000" & REG_DEVICE_TO_HOST; wait until rising_edge(clk);
+		wait until data_to_link_tb = x"00EC8027";
+		for i in 0 to 5 loop wait until rising_edge(clk); end loop;
+		data_from_link_tb <= x"000000" & PIO_SETUP_FIS; wait until rising_edge(clk); 
+		--for i in 0 to 5 loop wait until rising_edge(clk); end loop;		
+		data_from_link_tb <= x"000000" & DATA_FIS; wait until rising_edge(clk);
 		wait until data_to_link_tb = x"00358027";
 		for i in 0 to 11 loop wait until rising_edge(clk); end loop;
 		data_from_link_tb <= x"00000039"; wait until rising_edge(clk);
@@ -90,4 +99,6 @@ begin
 		for i in 0 to 9 loop wait until rising_edge(clk); end loop;
 	end process;
 
+	trans_rx_from_link_ready <= status_to_link_tb(6);
+	trans_tx_to_link_ready <= status_to_link_tb(5);
 end architecture;
